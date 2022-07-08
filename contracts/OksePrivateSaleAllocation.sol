@@ -1,15 +1,15 @@
 //SPDX-License-Identifier: LICENSED
 pragma solidity ^0.7.0;
-import "./MultiSigOwner.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./libraries/SafeMath.sol";
 import "./libraries/TransferHelper.sol";
 import "./interfaces/ERC20Interface.sol";
 
-contract OksePrivateSaleAllocation is MultiSigOwner {
+contract OksePrivateSaleAllocation is Ownable {
     using SafeMath for uint256;
-    address public okseAddress;
-    uint256 public delayTimeForWithdraw;
-    uint256 public withdrawDuration;
+    address public immutable okseAddress;
+    uint256 public immutable delayTimeForWithdraw;
+    uint256 public immutable withdrawDuration;
 
     bool public adminDeposited;
     uint256 public startTime;
@@ -21,11 +21,7 @@ contract OksePrivateSaleAllocation is MultiSigOwner {
 
     event AdminDeposit(address adminAddress, uint256 amount);
     event AdminWithdraw(address to, uint256 amount);
-    event ParamsUpdated(
-        address okseAddress,
-        uint256 delayTimeForWithdraw,
-        uint256 withdrawDuration
-    );
+
     modifier nonReentrant() {
         // On the first call to nonReentrant, _notEntered will be true
         require(_status != _ENTERED, "rc");
@@ -56,14 +52,14 @@ contract OksePrivateSaleAllocation is MultiSigOwner {
         delayTimeForWithdraw = 94608000 / 3; // 12 months
     }
 
-    function adminDeposit(bytes calldata signData, bytes calldata keys)
+    function adminDeposit()
         external
         nonReentrant
         adminDepositEnable
-        validSignOfOwner(signData, keys, "adminDeposit")
+        onlyOwner
     {
         uint256 amount = DepositAmount;
-        address userAddress = msg.sender;
+        address userAddress = tx.origin;
         TransferHelper.safeTransferFrom(
             okseAddress,
             userAddress,
@@ -76,20 +72,20 @@ contract OksePrivateSaleAllocation is MultiSigOwner {
         emit AdminDeposit(userAddress, amount);
     }
 
-    function adminWithdraw(bytes calldata signData, bytes calldata keys)
+    function adminWithdraw()
         external
         nonReentrant
         adminWithdrawEnable
-        validSignOfOwner(signData, keys, "adminWithdraw")
+        onlyOwner
     {
-        uint256 amount = getWidrawableAmount();
-        address to = msg.sender;
+        uint256 amount = getWithdrawableAmount();
+        address to = tx.origin;
         TransferHelper.safeTransfer(okseAddress, to, amount);
         withdrawedAmount = withdrawedAmount.add(amount);
         emit AdminWithdraw(to, amount);
     }
 
-    function getWidrawableAmount() public view returns (uint256) {
+    function getWithdrawableAmount() public view returns (uint256) {
         if(!adminDeposited) return 0;
         uint256 curTime = block.timestamp;
         if (curTime < startTime) return 0;
@@ -103,28 +99,5 @@ contract OksePrivateSaleAllocation is MultiSigOwner {
     function getWithdrawEndDate() public view returns (uint256) {
         require(adminDeposited, "not deposited yet");
         return startTime.add(withdrawDuration);
-    }
-
-    // verified
-    function setParams(bytes calldata signData, bytes calldata keys)
-        external
-        nonReentrant
-        validSignOfOwner(signData, keys, "setParams")
-    {
-        (, , , bytes memory params) = abi.decode(
-            signData,
-            (bytes4, uint256, uint256, bytes)
-        );
-
-        (
-            address _okseAddress,
-            uint256 _delayTimeForWithdraw,
-            uint256 _withdrawDuration
-        ) = abi.decode(params, (address, uint256, uint256));
-
-        okseAddress = _okseAddress;
-        delayTimeForWithdraw = _delayTimeForWithdraw;
-        withdrawDuration = _withdrawDuration;
-        emit ParamsUpdated(okseAddress, delayTimeForWithdraw, withdrawDuration);
     }
 }

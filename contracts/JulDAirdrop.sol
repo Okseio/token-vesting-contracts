@@ -1,19 +1,19 @@
 //SPDX-License-Identifier: LICENSED
 pragma solidity ^0.7.0;
-import "./MultiSigOwner.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "./libraries/SafeMath.sol";
 import "./libraries/TransferHelper.sol";
 import "./interfaces/ERC20Interface.sol";
 
-contract JulDAirdrop is MultiSigOwner {
+contract JulDAirdrop is Ownable {
     using SafeMath for uint256;
     uint256 public depositStartDate;
     uint256 public depositEndDate;
     uint256 public withdrawStartDate;
-    uint256 public withdrawDuration;
-    address public juldAddress;
-    address public okseAddress;
-    uint256 public swapRate; // 250/1000
+    uint256 public immutable withdrawDuration;
+    address public immutable juldAddress;
+    address public immutable okseAddress;
+    uint256 public immutable swapRate; // 250/1000
     bool public adminDeposited;
     uint256 private constant _NOT_ENTERED = 1;
     uint256 private constant _ENTERED = 2;
@@ -28,14 +28,11 @@ contract JulDAirdrop is MultiSigOwner {
     event UserWithdrawedJuld(address userAddress, uint256 amount);
 
     event AdminDeposit(address adminAddress, uint256 amount);
-    event AdminBurn(address adminAddress, uint256 amount);
-    event AddressUpdated(address juldAddress, address okseAddress);
-    event TimesAndSwapRateUpdated(
+    event AdminClaim(address adminAddress, uint256 amount);
+    event TimesUpdated(
         uint256 depositStartDate,
         uint256 depositEndDate,
-        uint256 withdrawStartDate,
-        uint256 withdrawDuration,
-        uint256 swapRate
+        uint256 withdrawStartDate
     );
 
     modifier depositEnable() {
@@ -61,9 +58,9 @@ contract JulDAirdrop is MultiSigOwner {
         _;
     }
 
-    modifier adminBurnEnable() {
+    modifier adminClaimEnable() {
         uint256 curTime = block.timestamp;
-        require(curTime > getWithdrawEndDate(), "burn not allowed now");
+        require(curTime > getWithdrawEndDate(), "claim not allowed now");
         _;
     }
     modifier adminDepositEnable() {
@@ -100,6 +97,7 @@ contract JulDAirdrop is MultiSigOwner {
         okseAddress = 0x606FB7969fC1b5CAd58e64b12Cf827FB65eE4875;
         swapRate = 250; // 250/1000
     }
+
     // verified
     function deposit(uint256 amount) external nonReentrant depositEnable {
         address userAddress = msg.sender;
@@ -112,10 +110,11 @@ contract JulDAirdrop is MultiSigOwner {
         userBalances[userAddress] = userBalances[userAddress].add(amount);
         emit UserDeposit(userAddress, amount);
     }
+
     // verified
     function withdraw() external nonReentrant withdrawEnable {
         address userAddress = msg.sender;
-        uint256 amount = getWidrawableAmount(userAddress);
+        uint256 amount = getWithdrawableAmount(userAddress);
         uint256 okseBalance = ERC20Interface(okseAddress).balanceOf(
             address(this)
         );
@@ -126,6 +125,7 @@ contract JulDAirdrop is MultiSigOwner {
         );
         emit UserWithdraw(userAddress, amount);
     }
+
     // verified
     function withdrawJulD()
         external
@@ -142,20 +142,15 @@ contract JulDAirdrop is MultiSigOwner {
         userWithdrawedJulD[userAddress] = true;
         emit UserWithdrawedJuld(userAddress, amount);
     }
+
     // verified
-    function adminDeposit(bytes calldata signData, bytes calldata keys)
+    function adminDeposit(uint256 amount)
         external
         nonReentrant
         adminDepositEnable
-        validSignOfOwner(signData, keys, "adminDeposit")
+        onlyOwner
     {
-        (, , , bytes memory params) = abi.decode(
-            signData,
-            (bytes4, uint256, uint256, bytes)
-        );
-        uint256 amount = abi.decode(params, (uint256));
-
-        address userAddress = msg.sender;
+        address userAddress = tx.origin;
         TransferHelper.safeTransferFrom(
             okseAddress,
             userAddress,
@@ -166,77 +161,37 @@ contract JulDAirdrop is MultiSigOwner {
         emit AdminDeposit(userAddress, amount);
     }
 
-    function adminBurnRemained(bytes calldata signData, bytes calldata keys)
+    function adminClaimRemained()
         external
         nonReentrant
-        adminBurnEnable
-        validSignOfOwner(signData, keys, "adminBurnRemained")
+        adminClaimEnable
+        onlyOwner
     {
-        address DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+        address userAddress = tx.origin;
         uint256 amount = ERC20Interface(okseAddress).balanceOf(address(this));
-        TransferHelper.safeTransfer(okseAddress, DEAD_ADDRESS, amount);
+        TransferHelper.safeTransfer(okseAddress, userAddress, amount);
+        emit AdminClaim(userAddress, amount);
     }
 
     // verified
-    function setTimesAndSwapRate(bytes calldata signData, bytes calldata keys)
-        external
-        nonReentrant
-        validSignOfOwner(signData, keys, "setTimesAndSwapRate")
-    {
-        (, , , bytes memory params) = abi.decode(
-            signData,
-            (bytes4, uint256, uint256, bytes)
-        );
-
-        (
-            uint256 _depositStartDate,
-            uint256 _depositEndDate,
-            uint256 _withdrawStartDate,
-            uint256 _withdrawDuration,
-            uint256 _swapRate
-        ) = abi.decode(params, (uint256, uint256, uint256, uint256, uint256));
+    function setParams(
+        uint256 _depositStartDate,
+        uint256 _depositEndDate,
+        uint256 _withdrawStartDate
+    ) external nonReentrant onlyOwner {
         require(_depositEndDate > _depositStartDate, "deposit time invalid");
         require(
             _withdrawStartDate > _depositEndDate,
             "withdraw start time invalid"
         );
         require(
-            _depositEndDate.add(_withdrawDuration) > _withdrawStartDate,
-            "withdraw duration invalid"
+            _depositEndDate.add(withdrawDuration) > _withdrawStartDate,
+            "withdraw date invalid"
         );
         depositStartDate = _depositStartDate;
         depositEndDate = _depositEndDate;
         withdrawStartDate = _withdrawStartDate;
-        withdrawDuration = _withdrawDuration;
-        swapRate = _swapRate;
-        emit TimesAndSwapRateUpdated(
-            depositStartDate,
-            depositEndDate,
-            withdrawStartDate,
-            withdrawDuration,
-            swapRate
-        );
-    }
-
-    // verified
-    function setTokenAddress(bytes calldata signData, bytes calldata keys)
-        external
-        nonReentrant
-        validSignOfOwner(signData, keys, "setTokenAddress")
-    {
-        (, , , bytes memory params) = abi.decode(
-            signData,
-            (bytes4, uint256, uint256, bytes)
-        );
-
-        (address _juldAddress, address _okseAddress) = abi.decode(
-            params,
-            (address, address)
-        );
-
-        juldAddress = _juldAddress;
-        okseAddress = _okseAddress;
-        emit AddressUpdated(juldAddress, okseAddress);
+        emit TimesUpdated(depositStartDate, depositEndDate, withdrawStartDate);
     }
 
     function getBlockTime() public view returns (uint256) {
@@ -247,12 +202,12 @@ contract JulDAirdrop is MultiSigOwner {
         return depositEndDate.add(withdrawDuration);
     }
 
-    function getWidrawableAmount(address userAddress)
+    function getWithdrawableAmount(address userAddress)
         public
         view
         returns (uint256)
     {
-        if(!adminDeposited) return 0;
+        if (!adminDeposited) return 0;
         uint256 curTime = block.timestamp;
         if (curTime < withdrawStartDate) return 0;
         if (curTime >= getWithdrawEndDate()) return 0;
