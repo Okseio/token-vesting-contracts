@@ -17,7 +17,7 @@ contract OksePrivateSaleAllocation is Ownable {
     uint256 private constant _NOT_ENTERED = 1;
     uint256 private constant _ENTERED = 2;
     uint256 private _status;
-    uint256 public constant DepositAmount = 100000000 ether;
+    uint256 public constant DepositAmount = 91600000 ether;
 
     event AdminDeposit(address adminAddress, uint256 amount);
     event AdminWithdraw(address to, uint256 amount);
@@ -49,7 +49,7 @@ contract OksePrivateSaleAllocation is Ownable {
         _status = _NOT_ENTERED;
         okseAddress = 0x606FB7969fC1b5CAd58e64b12Cf827FB65eE4875;
         withdrawDuration = 94608000; // 36 months
-        delayTimeForWithdraw = 94608000 / 3; // 12 months
+        delayTimeForWithdraw = 94608000 / 6; // 6 months
     }
 
     function adminDeposit()
